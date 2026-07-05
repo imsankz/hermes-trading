@@ -104,8 +104,11 @@ async def run_loop(assets: list[str], goal: dict) -> None:
             # 2. Evaluate strategy against current market state
             signal = evaluate_strategy(strategy, price_data, onchain_data, news_data, macro_data)
 
-            # 3. Execute paper trade if signal fires
+            # 3. Execute paper trade if signal fires (skip if already holding)
             if signal:
+                existing = [t for t in load_trades() if t.get("status") == "open" and t.get("asset") == asset]
+                if existing:
+                    continue
                 trade = {
                     "timestamp": timestamp,
                     "asset": asset,
