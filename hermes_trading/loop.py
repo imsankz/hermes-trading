@@ -2,11 +2,13 @@
 from __future__ import annotations
 import asyncio
 import json
+import os
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 import yaml
 
 from .adapters.price import fetch_price
@@ -58,6 +60,13 @@ def save_trades(trades: list[dict]) -> None:
 
 def write_heartbeat(data: dict) -> None:
     HEARTBEAT_FILE.write_text(json.dumps(data, indent=2))
+
+
+def notify_trade(msg: str) -> None:
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat = os.environ.get("TELEGRAM_CHAT_ID")
+    if token and chat:
+        httpx.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat, "text": msg}, timeout=10)
 
 
 class CircuitBreaker(Exception):
@@ -119,6 +128,7 @@ async def run_loop(assets: list[str], goal: dict) -> None:
                 }
                 append_trade(trade)
                 print(f"[loop] Paper trade opened: {signal['action']} {asset} @ {trade['entry_price']}", flush=True)
+                notify_trade(f"{signal['action'].upper()} {asset} @ ${trade['entry_price']:.2f} (paper)")
 
             # 4. Close only when RSI is back above threshold (no buy signal)
             if not signal:
@@ -130,6 +140,7 @@ async def run_loop(assets: list[str], goal: dict) -> None:
                         t["status"] = "closed"
                         t["pnl_pct"] = ((close_price - t["entry_price"]) / t["entry_price"]) * 100
                         print(f"[loop] Paper trade closed: {asset} {t['pnl_pct']:.2f}%", flush=True)
+                        notify_trade(f"SELL {asset} @ ${close_price:.2f} ({t['pnl_pct']:+.2f}%) (paper)")
                 save_trades(trades)
 
         # 5. Portfolio-level: score all trades
