@@ -50,6 +50,12 @@ def append_trade(trade: dict) -> None:
         f.write(json.dumps(trade) + "\n")
 
 
+def save_trades(trades: list[dict]) -> None:
+    with TRADES_FILE.open("w") as f:
+        for t in trades:
+            f.write(json.dumps(t) + "\n")
+
+
 def write_heartbeat(data: dict) -> None:
     HEARTBEAT_FILE.write_text(json.dumps(data, indent=2))
 
@@ -111,15 +117,17 @@ async def run_loop(assets: list[str], goal: dict) -> None:
                 append_trade(trade)
                 print(f"[loop] Paper trade opened: {signal['action']} {asset} @ {trade['entry_price']}", flush=True)
 
-            # 4. Close matching open trades
-            trades = load_trades()
-            for t in trades:
-                if t.get("status") == "open" and t.get("asset") == asset:
-                    close_price = price_data.get("last", 0)
-                    t["exit_price"] = close_price
-                    t["status"] = "closed"
-                    t["pnl_pct"] = ((close_price - t["entry_price"]) / t["entry_price"]) * 100
-                    print(f"[loop] Paper trade closed: {asset} {t['pnl_pct']:.2f}%", flush=True)
+            # 4. Close only when RSI is back above threshold (no buy signal)
+            if not signal:
+                trades = load_trades()
+                for t in trades:
+                    if t.get("status") == "open" and t.get("asset") == asset:
+                        close_price = price_data.get("last", 0)
+                        t["exit_price"] = close_price
+                        t["status"] = "closed"
+                        t["pnl_pct"] = ((close_price - t["entry_price"]) / t["entry_price"]) * 100
+                        print(f"[loop] Paper trade closed: {asset} {t['pnl_pct']:.2f}%", flush=True)
+                save_trades(trades)
 
         # 5. Portfolio-level: score all trades
         all_trades = load_trades()
