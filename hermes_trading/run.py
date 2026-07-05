@@ -24,7 +24,7 @@ def main() -> int:
     goal = load_goal(goal_path)
     asset = args.asset or goal.get("asset", "IWDA.DE")
 
-    print(f"[hermes-trading] Starting worker for {asset}")
+    print(f"[hermes-trading] Starting worker for {asset}", flush=True)
     try:
         asyncio.run(run_loop(asset, goal))
     except KeyboardInterrupt:
