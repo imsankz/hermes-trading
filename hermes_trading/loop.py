@@ -65,7 +65,7 @@ async def fetch_with_retry(fetch_fn, name: str, max_retries: int = 3) -> dict:
             return await fetch_fn()
         except Exception as e:
             wait = 2 ** attempt
-            print(f"[loop] {name} attempt {attempt + 1} failed: {e}, retry in {wait}s")
+            print(f"[loop] {name} attempt {attempt + 1} failed: {e}, retry in {wait}s", flush=True)
             await asyncio.sleep(wait)
     raise RuntimeError(f"{name} failed after {max_retries} attempts")
 
@@ -88,7 +88,7 @@ async def run_loop(asset: str, goal: dict) -> None:
             consecutive_failures = 0
         except Exception as e:
             consecutive_failures += 1
-            print(f"[loop] All adapters failed ({consecutive_failures}/5): {e}")
+            print(f"[loop] All adapters failed ({consecutive_failures}/5): {e}", flush=True)
             if consecutive_failures >= 5:
                 raise CircuitBreaker("5 consecutive adapter failures")
             await asyncio.sleep(60)
@@ -108,7 +108,7 @@ async def run_loop(asset: str, goal: dict) -> None:
                 "status": "open",
             }
             append_trade(trade)
-            print(f"[loop] Paper trade opened: {signal['action']} {asset} @ {trade['entry_price']}")
+            print(f"[loop] Paper trade opened: {signal['action']} {asset} @ {trade['entry_price']}", flush=True)
 
         # 4. Close any open trades that hit stop/target (simplified)
         trades = load_trades()
@@ -118,18 +118,18 @@ async def run_loop(asset: str, goal: dict) -> None:
                 t["exit_price"] = close_price
                 t["status"] = "closed"
                 t["pnl_pct"] = ((close_price - t["entry_price"]) / t["entry_price"]) * 100
-                print(f"[loop] Paper trade closed: {t['pnl_pct']:.2f}%")
+                print(f"[loop] Paper trade closed: {t['pnl_pct']:.2f}%", flush=True)
 
         # 5. Score trades against goal
         score = score_trades(trades, goal)
-        print(f"[loop] Portfolio score: {score:.3f}")
+        print(f"[loop] Portfolio score: {score:.3f}", flush=True)
 
         # 6. Reflection cycle
         reflection_result = maybe_reflect(trades, strategy, goal)
         if reflection_result:
             new_strategy, hypothesis = reflection_result
             save_strategy(new_strategy)
-            print(f"[loop] Reflection: {hypothesis['change']}")
+            print(f"[loop] Reflection: {hypothesis['change']}", flush=True)
 
         # 7. Heartbeat
         write_heartbeat({
