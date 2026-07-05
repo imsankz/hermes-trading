@@ -22,11 +22,11 @@ def main() -> int:
 
     goal_path = Path(__file__).parent.parent / "state" / "goal.yaml"
     goal = load_goal(goal_path)
-    asset = args.asset or goal.get("asset", "IWDA.DE")
+    assets = goal.get("assets", [goal.get("asset", "VWCE.DE")])
 
-    print(f"[hermes-trading] Starting worker for {asset}", flush=True)
+    print(f"[hermes-trading] Starting worker for {len(assets)} assets: {', '.join(assets)}", flush=True)
     try:
-        asyncio.run(run_loop(asset, goal))
+        asyncio.run(run_loop(assets, goal))
     except KeyboardInterrupt:
         print("\n[hermes-trading] Shutdown requested")
     return 0

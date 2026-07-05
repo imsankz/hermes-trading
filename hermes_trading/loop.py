@@ -70,62 +70,64 @@ async def fetch_with_retry(fetch_fn, name: str, max_retries: int = 3) -> dict:
     raise RuntimeError(f"{name} failed after {max_retries} attempts")
 
 
-async def run_loop(asset: str, goal: dict) -> None:
-    """Main trading loop — runs every 60 seconds."""
+async def run_loop(assets: list[str], goal: dict) -> None:
+    """Main trading loop — runs every 60 seconds, iterating all assets."""
     consecutive_failures = 0
     strategy = load_strategy()
 
     while True:
         cycle_start = time.time()
         timestamp = datetime.utcnow().isoformat() + "Z"
+        total_signal = None
 
-        # 1. Fetch data from all adapters
-        try:
-            price_data = await fetch_with_retry(lambda: fetch_price(asset), "price")
-            onchain_data = await fetch_with_retry(lambda: fetch_onchain(asset), "onchain")
-            news_data = await fetch_with_retry(lambda: fetch_news(asset), "news")
-            macro_data = await fetch_with_retry(lambda: fetch_macro(), "macro")
-            consecutive_failures = 0
-        except Exception as e:
-            consecutive_failures += 1
-            print(f"[loop] All adapters failed ({consecutive_failures}/5): {e}", flush=True)
-            if consecutive_failures >= 5:
-                raise CircuitBreaker("5 consecutive adapter failures")
-            await asyncio.sleep(60)
-            continue
+        for asset in assets:
+            # 1. Fetch data from all adapters
+            try:
+                price_data = await fetch_with_retry(lambda a=asset: fetch_price(a), "price")
+                onchain_data = await fetch_with_retry(lambda a=asset: fetch_onchain(a), "onchain")
+                news_data = await fetch_with_retry(lambda a=asset: fetch_news(a), "news")
+                macro_data = await fetch_with_retry(lambda: fetch_macro(), "macro")
+                consecutive_failures = 0
+            except Exception as e:
+                consecutive_failures += 1
+                print(f"[loop] {asset} adapters failed ({consecutive_failures}/5): {e}", flush=True)
+                if consecutive_failures >= 5:
+                    raise CircuitBreaker("5 consecutive adapter failures")
+                continue
 
-        # 2. Evaluate strategy against current market state
-        signal = evaluate_strategy(strategy, price_data, onchain_data, news_data, macro_data)
+            # 2. Evaluate strategy against current market state
+            signal = evaluate_strategy(strategy, price_data, onchain_data, news_data, macro_data)
 
-        # 3. Execute paper trade if signal fires
-        if signal:
-            trade = {
-                "timestamp": timestamp,
-                "asset": asset,
-                "signal": signal,
-                "strategy_version": strategy.get("version", "00"),
-                "entry_price": price_data.get("last", 0),
-                "status": "open",
-            }
-            append_trade(trade)
-            print(f"[loop] Paper trade opened: {signal['action']} {asset} @ {trade['entry_price']}", flush=True)
+            # 3. Execute paper trade if signal fires
+            if signal:
+                trade = {
+                    "timestamp": timestamp,
+                    "asset": asset,
+                    "signal": signal,
+                    "strategy_version": strategy.get("version", "00"),
+                    "entry_price": price_data.get("last", 0),
+                    "status": "open",
+                }
+                append_trade(trade)
+                print(f"[loop] Paper trade opened: {signal['action']} {asset} @ {trade['entry_price']}", flush=True)
 
-        # 4. Close any open trades that hit stop/target (simplified)
-        trades = load_trades()
-        for t in trades:
-            if t.get("status") == "open":
-                close_price = price_data.get("last", 0)
-                t["exit_price"] = close_price
-                t["status"] = "closed"
-                t["pnl_pct"] = ((close_price - t["entry_price"]) / t["entry_price"]) * 100
-                print(f"[loop] Paper trade closed: {t['pnl_pct']:.2f}%", flush=True)
+            # 4. Close matching open trades
+            trades = load_trades()
+            for t in trades:
+                if t.get("status") == "open" and t.get("asset") == asset:
+                    close_price = price_data.get("last", 0)
+                    t["exit_price"] = close_price
+                    t["status"] = "closed"
+                    t["pnl_pct"] = ((close_price - t["entry_price"]) / t["entry_price"]) * 100
+                    print(f"[loop] Paper trade closed: {asset} {t['pnl_pct']:.2f}%", flush=True)
 
-        # 5. Score trades against goal
-        score = score_trades(trades, goal)
+        # 5. Portfolio-level: score all trades
+        all_trades = load_trades()
+        score = score_trades(all_trades, goal)
         print(f"[loop] Portfolio score: {score:.3f}", flush=True)
 
         # 6. Reflection cycle
-        reflection_result = maybe_reflect(trades, strategy, goal)
+        reflection_result = maybe_reflect(all_trades, strategy, goal)
         if reflection_result:
             new_strategy, hypothesis = reflection_result
             save_strategy(new_strategy)
@@ -134,9 +136,9 @@ async def run_loop(asset: str, goal: dict) -> None:
         # 7. Heartbeat
         write_heartbeat({
             "timestamp": timestamp,
-            "asset": asset,
-            "open_trades": sum(1 for t in trades if t.get("status") == "open"),
-            "total_trades": len(trades),
+            "assets": assets,
+            "open_trades": sum(1 for t in all_trades if t.get("status") == "open"),
+            "total_trades": len(all_trades),
             "score": score,
             "strategy_version": strategy.get("version", "00"),
         })
